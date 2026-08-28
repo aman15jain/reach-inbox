@@ -27,6 +27,9 @@ export const env = {
 
   elasticsearchNode: process.env.ELASTICSEARCH_NODE ?? "http://localhost:9200",
   elasticsearchIndex: process.env.ELASTICSEARCH_INDEX ?? "emails",
+  // Elastic Cloud Serverless requires API-key auth; the local/Docker ES
+  // container runs with security disabled, so this stays optional.
+  elasticsearchApiKey: process.env.ELASTICSEARCH_API_KEY || undefined,
 
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY ?? 5),
   minDelayBetweenEmailsMs: Number(process.env.MIN_DELAY_BETWEEN_EMAILS_MS ?? 2000),

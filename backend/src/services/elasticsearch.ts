@@ -1,7 +1,10 @@
 import { Client } from "@elastic/elasticsearch";
 import { env } from "../config/env";
 
-export const esClient = new Client({ node: env.elasticsearchNode });
+export const esClient = new Client({
+  node: env.elasticsearchNode,
+  auth: env.elasticsearchApiKey ? { apiKey: env.elasticsearchApiKey } : undefined,
+});
 
 let indexReady = false;
 
