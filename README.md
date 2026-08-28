@@ -238,7 +238,7 @@ This project sends real SMTP mail through [Ethereal Email](https://ethereal.emai
 | Email sending | Nodemailer |
 | Email testing sandbox | Ethereal Email |
 | Search index | Elasticsearch (`@elastic/elasticsearch`) |
-| Auth | Google OAuth 2.0 (Passport), JWT session cookie |
+| Auth | Google OAuth 2.0 (Passport), JWT Bearer token (`Authorization` header, not a cookie) |
 | Team notifications | Slack OAuth v2 + Web API (incoming webhook / `chat.postMessage`) |
 | Local infra | Docker / Docker Compose (Postgres, Redis, Elasticsearch) |
 
@@ -337,7 +337,9 @@ npm run dev           # frontend/ — Vite dashboard
 
 This mirrors how the system is actually meant to run: the API and the worker are separate concerns that can be scaled, restarted, and deployed independently of each other.
 
-**The current production/deployment setup does not preserve that separation** — it's a free-tier compromise, not the target architecture. `npm run start:all` (`backend/src/startAll.ts`) exists specifically because a free single Render Web Service only gives you one process to run, with no separate Background Worker product available. `start:all` spawns the compiled API and the compiled worker as two real, independent `node` child processes under one parent, forwards shutdown signals to both, and takes both down together if either crashes — which is as safe as this constraint can be made, but it still means the worker's failure/restart is now coupled to the API's, and they compete for the same container's resources. **This is explicitly not how the project would be deployed given a real background-worker product to deploy onto** — the correct target architecture keeps the API and the worker as separate deployable services sharing the same Postgres and Redis, exactly as local development already does. Full deployment steps and caveats are in §10.
+**Current production (EC2, §11) preserves that separation** — `outbox-api` and `outbox-worker` run as two independent PM2 processes on the server, restarted independently, exactly like `npm run dev` + `npm run worker:dev` locally, just running the compiled `dist/` output instead of `tsx watch`. This is the target architecture, not a compromise.
+
+**The Render deployment path (§10) does not preserve that separation** — that's a free-tier compromise specific to Render, not the target architecture, and isn't the current production setup. `npm run start:all` (`backend/src/startAll.ts`) exists specifically because a free single Render Web Service only gives you one process to run, with no separate Background Worker product available. `start:all` spawns the compiled API and the compiled worker as two real, independent `node` child processes under one parent, forwards shutdown signals to both, and takes both down together if either crashes — which is as safe as this constraint can be made, but it still means the worker's failure/restart is coupled to the API's, and they compete for the same container's resources. It remains documented here as a viable free-tier option, just not what's actually deployed right now.
 
 ---
 
@@ -422,6 +424,121 @@ Both are derived from `BACKEND_URL` at runtime — no code change needed either 
 - **Graceful shutdown is best-effort** — the launcher forwards `SIGTERM` and waits up to 8s, but Render's own shutdown grace period ultimately decides whether an in-flight send finishes.
 
 **Honestly: this is not how it'd be run in real production.** A proper deployment keeps the API and the worker as separate services (a paid Background Worker, separate ECS tasks/Kubernetes deployments — anything that scales, restarts, and fails independently) sharing the same Postgres and Redis. Co-locating them here is a free-tier constraint, made as safe as it can be — real BullMQ, real Redis, real child processes, signal forwarding, crash-takes-both-down — but it's a deployment compromise, not the target architecture.
+
+---
+
+## 11. AWS EC2 Deployment (current production)
+
+Unlike the Render path (§10), EC2 gives full control over the instance, so the API and the worker run as **two genuinely independent processes** — the target architecture from §8, not a single-process workaround. Frontend can stay wherever (Render Static Site, Vercel, etc.) — this section only covers the backend.
+
+### 11.1 Launch the instance
+
+EC2 console → **Launch instance** → Ubuntu (22.04/24.04 LTS or newer) → any small instance type (`t3.micro` is enough for this workload) → create/download a key pair (`.pem`) → in the security group, allow inbound **SSH (22)** from your IP for setup.
+
+### 11.2 Give the instance access to a private repo
+
+If the repo is private, generate a deploy key on the instance rather than putting a personal token on disk:
+
+```bash
+ssh -i your-key.pem ubuntu@<ec2-public-ip>
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N '' -C 'ec2-deploy-key'
+cat ~/.ssh/id_ed25519.pub
+```
+
+Paste that public key into **GitHub repo → Settings → Deploy keys → Add deploy key** (leave "Allow write access" unchecked — read-only is all a deploy needs). Then:
+
+```bash
+ssh -T git@github.com   # confirms the key works
+git clone git@github.com:<you>/<repo>.git ~/reach-inbox
+```
+
+### 11.3 Install the runtime
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs git nginx
+sudo npm install -g pm2
+```
+
+### 11.4 Configure and build the backend
+
+```bash
+cd ~/reach-inbox/backend
+cp .env.example .env   # then fill in every value from §6 — same Postgres/Redis/ES/OAuth
+                        # credentials as any other deployment; set BACKEND_URL once
+                        # you know it (§11.6), FRONTEND_URL to wherever the dashboard lives
+npm install --include=dev   # see the note under §10.5 — needed for the same reason here
+npx prisma generate
+npx prisma migrate deploy
+npm run build
+```
+
+### 11.5 Run the API and worker as two separate PM2 processes
+
+```bash
+cd ~/reach-inbox/backend
+pm2 start dist/server.js --name outbox-api
+pm2 start dist/workers/runWorker.js --name outbox-worker
+pm2 startup systemd -u ubuntu --hp /home/ubuntu   # run the printed command, then:
+pm2 save
+```
+
+`pm2 startup` + `pm2 save` means both processes come back automatically if the instance reboots. Each restarts independently on crash — a worker crash doesn't take the API down and vice versa, which is exactly the separation Render's single-process setup can't offer.
+
+### 11.6 Put Nginx in front, and get real HTTPS without owning a domain
+
+Google/Slack OAuth need an HTTPS redirect URI, and Let's Encrypt won't issue a certificate for a bare IP address. The fix is a free wildcard-DNS service like [sslip.io](https://sslip.io) or [nip.io](https://nip.io): `<ip-with-dashes>.sslip.io` resolves straight back to your instance's IP, so it's a real hostname Let's Encrypt will happily certify — no domain purchase needed.
+
+```nginx
+# /etc/nginx/sites-available/outbox
+server {
+    listen 80;
+    server_name <ip-with-dashes>.sslip.io;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf /etc/nginx/sites-available/outbox /etc/nginx/sites-enabled/outbox
+sudo nginx -t && sudo systemctl restart nginx && sudo systemctl enable nginx
+
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d <ip-with-dashes>.sslip.io --non-interactive --agree-tos \
+  -m you@example.com --redirect
+```
+
+Certbot edits the Nginx config in place to serve HTTPS with the new certificate, redirects HTTP → HTTPS, and sets up automatic renewal. Then point the app at its own real URL and restart so the OAuth callback URLs it builds are correct:
+
+```bash
+# in backend/.env: BACKEND_URL=https://<ip-with-dashes>.sslip.io
+pm2 restart outbox-api outbox-worker
+```
+
+### 11.7 Open the required ports
+
+EC2 console → instance → **Security** tab → the attached security group (usually `launch-wizard-N`, not `default` — check its inbound rules include SSH/22, since that's how you connected) → **Edit inbound rules** → add **HTTP (80)** and **HTTPS (443)**, source `0.0.0.0/0`.
+
+### 11.8 Update OAuth redirect URIs and the frontend's API URL
+
+Same pattern as any other deployment (§10.7): add `https://<ip-with-dashes>.sslip.io/api/auth/google/callback` and `.../api/slack/callback` to the Google/Slack app configs, and set the frontend's `VITE_API_URL` to `https://<ip-with-dashes>.sslip.io`.
+
+### 11.9 Redeploying after a code change
+
+```bash
+ssh -i your-key.pem ubuntu@<ec2-public-ip>
+cd ~/reach-inbox && git pull
+cd backend && npm install --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
+pm2 restart outbox-api outbox-worker
+```
 
 ---
 
