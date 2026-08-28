@@ -387,11 +387,13 @@ Optional. Set `ELASTICSEARCH_NODE` to a free external host if you want live sear
 Render dashboard → **New → Web Service** → connect this repo →
 
 - **Root Directory:** `backend`
-- **Build Command:** `npm install && npx prisma generate && npx prisma migrate deploy && npm run build`
+- **Build Command:** `npm install --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build`
 - **Start Command:** `npm run start:all`
 - **Health Check Path:** `/api/health`
 
 `prisma migrate deploy` applies any pending migrations against `DIRECT_URL` on every deploy — safe to run even when there's nothing new to apply. Render injects `PORT` automatically; nothing to change for that (§6).
+
+**`--include=dev` matters here even though you'll set `NODE_ENV=production`** (§10.6): `npm install` skips `devDependencies` whenever `NODE_ENV=production` is set, and Render exposes that env var during the build step too — but `typescript` and every `@types/*` package this project needs to compile live in `devDependencies` (they're build-time only, correctly not needed at runtime). Without this flag the build fails with `TS7016`/"Could not find a declaration file" errors for every third-party import. `--include=dev` forces them in for this install regardless of `NODE_ENV`, while the running app still sees `NODE_ENV=production` at runtime as intended.
 
 ### 10.6 Environment variables to set on Render
 
