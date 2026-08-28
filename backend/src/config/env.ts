@@ -23,6 +23,7 @@ export const env = {
   redisHost: process.env.REDIS_HOST ?? "localhost",
   redisPort: Number(process.env.REDIS_PORT ?? 6379),
   redisPassword: process.env.REDIS_PASSWORD || undefined,
+  redisTls: process.env.REDIS_TLS === "true",
 
   elasticsearchNode: process.env.ELASTICSEARCH_NODE ?? "http://localhost:9200",
   elasticsearchIndex: process.env.ELASTICSEARCH_INDEX ?? "emails",

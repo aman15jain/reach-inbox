@@ -9,6 +9,9 @@ export const redis = new IORedis({
   port: env.redisPort,
   password: env.redisPassword,
   maxRetriesPerRequest: null,
+  // Managed free-tier Redis (e.g. Upstash) requires TLS; local/Docker Redis
+  // doesn't speak it at all, so this stays opt-in via REDIS_TLS.
+  tls: env.redisTls ? {} : undefined,
 });
 
 redis.on("error", (err) => {
