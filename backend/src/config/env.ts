@@ -16,7 +16,6 @@ export const env = {
   frontendUrl: required("FRONTEND_URL", "http://localhost:5173"),
   backendUrl: required("BACKEND_URL", "http://localhost:4000"),
   jwtSecret: required("JWT_SECRET", "dev-secret-change-me"),
-  cookieSecure: process.env.COOKIE_SECURE === "true",
 
   databaseUrl: required("DATABASE_URL"),
 

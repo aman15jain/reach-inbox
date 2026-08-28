@@ -46,3 +46,19 @@ export interface SlackStatus {
   connected: boolean;
   teamName: string | null;
 }
+
+export interface EmailSearchHit {
+  id: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: EmailStatus;
+  senderEmail: string;
+  scheduledAt: string;
+  sentAt?: string | null;
+}
+
+export interface SearchResult {
+  hits: EmailSearchHit[];
+  degraded: boolean;
+}

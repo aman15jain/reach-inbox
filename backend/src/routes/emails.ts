@@ -76,6 +76,7 @@ emailsRouter.post("/schedule", requireAuth, async (req, res) => {
       doc: {
         userId: r.userId,
         senderId: r.senderId,
+        senderEmail: sender.email,
         recipient: r.recipient,
         subject: r.subject,
         body: r.body,

@@ -78,6 +78,7 @@ async function processEmailJob(job: Job<EmailJobData>, token?: string) {
     await indexEmailDoc(email.id, {
       userId: email.userId,
       senderId: email.senderId,
+      senderEmail: email.sender.email,
       recipient: email.recipient,
       subject: email.subject,
       body: email.body,
@@ -94,6 +95,7 @@ async function processEmailJob(job: Job<EmailJobData>, token?: string) {
     await indexEmailDoc(email.id, {
       userId: email.userId,
       senderId: email.senderId,
+      senderEmail: email.sender.email,
       recipient: email.recipient,
       subject: email.subject,
       body: email.body,

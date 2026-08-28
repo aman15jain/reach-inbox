@@ -2,7 +2,7 @@ import { Router } from "express";
 import passport from "passport";
 import { env, isGoogleOAuthConfigured } from "../config/env";
 import { prisma } from "../lib/prisma";
-import { AUTH_COOKIE_NAME, requireAuth, signAuthToken } from "../middleware/requireAuth";
+import { requireAuth, signAuthToken } from "../middleware/requireAuth";
 
 export const authRouter = Router();
 
@@ -28,22 +28,12 @@ authRouter.get(
   (req, res) => {
     const user = req.user as { id: string };
     const token = signAuthToken(user.id);
-    res.cookie(AUTH_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: env.cookieSecure,
-      // Frontend and backend are deployed on different Render subdomains,
-      // which browsers treat as fully separate sites (onrender.com is on
-      // the Public Suffix List). A SameSite=Lax cookie is only sent on
-      // top-level navigations cross-site — never on the XHR/fetch calls
-      // AuthContext makes to /api/auth/me — so it silently never reaches
-      // the backend and every request looks logged-out. SameSite=None
-      // (only valid alongside Secure, hence tied to cookieSecure) fixes
-      // that; local dev over plain http keeps the Lax default since
-      // None+non-Secure cookies are rejected by browsers outright.
-      sameSite: env.cookieSecure ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    res.redirect(`${env.frontendUrl}/dashboard`);
+    // Handed off via URL fragment, not a cookie: fragments are never sent
+    // to any server (ours or anyone else's) on subsequent requests, and
+    // this sidesteps cross-site cookie blocking entirely. The frontend
+    // reads it once on load, stores it, and attaches it as a Bearer token
+    // from then on (see frontend/src/context/AuthContext.tsx).
+    res.redirect(`${env.frontendUrl}/dashboard#token=${token}`);
   }
 );
 
@@ -54,6 +44,7 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 });
 
 authRouter.post("/logout", (_req, res) => {
-  res.clearCookie(AUTH_COOKIE_NAME);
+  // Stateless JWT — nothing to invalidate server-side. The frontend drops
+  // the token from localStorage; this endpoint exists for API symmetry.
   res.json({ ok: true });
 });

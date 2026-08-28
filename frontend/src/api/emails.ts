@@ -1,5 +1,5 @@
 import { api } from "./client";
-import { EmailRow, PaginatedResult, ScheduleEmailPayload, Sender, SlackStatus } from "../types";
+import { EmailRow, PaginatedResult, ScheduleEmailPayload, SearchResult, Sender, SlackStatus } from "../types";
 
 export async function fetchSenders(): Promise<Sender[]> {
   const { data } = await api.get<Sender[]>("/senders");
@@ -27,6 +27,11 @@ export async function uploadLeadsFile(file: File): Promise<{ count: number; emai
 
 export async function scheduleEmails(payload: ScheduleEmailPayload): Promise<{ batchId: string; scheduled: number }> {
   const { data } = await api.post("/emails/schedule", payload);
+  return data;
+}
+
+export async function searchEmails(query: string): Promise<SearchResult> {
+  const { data } = await api.get<SearchResult>("/emails/search", { params: { q: query } });
   return data;
 }
 

@@ -5,7 +5,27 @@ import { Sidebar, DashboardTab } from "../components/Sidebar";
 import { TopBar } from "../components/TopBar";
 import { EmailTable } from "../components/EmailTable";
 import { ComposeModal } from "../components/ComposeModal";
-import { fetchScheduledEmails, fetchSentEmails } from "../api/emails";
+import { fetchScheduledEmails, fetchSentEmails, searchEmails } from "../api/emails";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { EmailRow, EmailSearchHit } from "../types";
+
+const STATUSES_BY_TAB: Record<DashboardTab, EmailRow["status"][]> = {
+  scheduled: ["scheduled", "processing", "rate_limited_delayed"],
+  sent: ["sent", "failed"],
+};
+
+function toEmailRow(hit: EmailSearchHit): EmailRow {
+  return {
+    id: hit.id,
+    recipient: hit.recipient,
+    subject: hit.subject,
+    body: hit.body,
+    status: hit.status,
+    scheduledAt: hit.scheduledAt,
+    sentAt: hit.sentAt,
+    sender: { email: hit.senderEmail },
+  };
+}
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -19,6 +39,17 @@ export default function DashboardPage() {
   const sentQuery = useQuery({ queryKey: ["sent-emails"], queryFn: () => fetchSentEmails() });
 
   const activeQuery = tab === "scheduled" ? scheduledQuery : sentQuery;
+
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
+  const isSearching = debouncedSearch.length > 0;
+
+  // Real Elasticsearch-backed search (GET /api/emails/search), not just a
+  // client-side filter of whatever page happens to already be loaded.
+  const searchQuery = useQuery({
+    queryKey: ["search-emails", debouncedSearch],
+    queryFn: () => searchEmails(debouncedSearch),
+    enabled: isSearching,
+  });
 
   // The Slack OAuth callback (backend, not this app) redirects here with
   // ?slack=connected|error after the user authorizes on Slack's side.
@@ -40,12 +71,25 @@ export default function DashboardPage() {
     // param the OAuth redirect lands with, not to ongoing param changes.
   }, []);
 
-  const filteredRows = useMemo(() => {
-    const rows = activeQuery.data?.items ?? [];
-    if (!search.trim()) return rows;
-    const q = search.toLowerCase();
-    return rows.filter((r) => r.recipient.toLowerCase().includes(q) || r.subject.toLowerCase().includes(q));
-  }, [activeQuery.data, search]);
+  const rows = useMemo(() => {
+    const tabStatuses = STATUSES_BY_TAB[tab];
+
+    if (isSearching) {
+      // If Elasticsearch is unreachable, searchEmails() comes back
+      // `degraded: true` with no hits — fall back to filtering whatever
+      // page is already loaded instead of showing a false "no results".
+      if (searchQuery.data && !searchQuery.data.degraded) {
+        return searchQuery.data.hits.filter((h) => tabStatuses.includes(h.status)).map(toEmailRow);
+      }
+      const loaded = activeQuery.data?.items ?? [];
+      const q = debouncedSearch.toLowerCase();
+      return loaded.filter((r) => r.recipient.toLowerCase().includes(q) || r.subject.toLowerCase().includes(q));
+    }
+
+    return activeQuery.data?.items ?? [];
+  }, [isSearching, searchQuery.data, activeQuery.data, tab, debouncedSearch]);
+
+  const isLoading = isSearching ? searchQuery.isLoading : activeQuery.isLoading;
 
   return (
     <div className="flex h-screen bg-white">
@@ -72,7 +116,13 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <EmailTable rows={filteredRows} isLoading={activeQuery.isLoading} mode={tab} />
+        {isSearching && searchQuery.data?.degraded && (
+          <p className="mx-8 mt-4 text-xs text-amber-600">
+            Search is temporarily degraded — showing matches from what's already loaded instead of the full index.
+          </p>
+        )}
+
+        <EmailTable rows={rows} isLoading={isLoading} mode={tab} />
       </main>
 
       {composeOpen && (

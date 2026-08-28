@@ -18,6 +18,7 @@ export async function ensureEmailIndex(): Promise<void> {
           properties: {
             userId: { type: "keyword" },
             senderId: { type: "keyword" },
+            senderEmail: { type: "keyword" },
             recipient: { type: "keyword" },
             subject: { type: "text" },
             body: { type: "text" },
@@ -42,6 +43,7 @@ export async function ensureEmailIndex(): Promise<void> {
 export interface EmailDoc {
   userId: string;
   senderId: string;
+  senderEmail: string;
   recipient: string;
   subject: string;
   body: string;

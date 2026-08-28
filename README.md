@@ -179,7 +179,7 @@ This project sends real SMTP mail through [Ethereal Email](https://ethereal.emai
 ### Backend
 
 - Express REST API (`backend/src/app.ts`, `backend/src/routes/*.ts`)
-- Google OAuth login via Passport, JWT-in-httpOnly-cookie session (`backend/src/passport/google.ts`, `backend/src/middleware/requireAuth.ts`)
+- Google OAuth login via Passport, JWT Bearer-token session (`backend/src/passport/google.ts`, `backend/src/middleware/requireAuth.ts`) — the callback hands the token to the frontend via a URL fragment rather than a cookie, since frontend and backend are deployed on different sites and cross-site cookies are unreliable across browsers (see `backend/src/routes/auth.ts`)
 - Email scheduling API, one row + one BullMQ job per recipient (`backend/src/routes/emails.ts`)
 - BullMQ delayed jobs as the sole scheduling mechanism — no cron (`backend/src/queues/emailQueue.ts`)
 - Redis as the BullMQ backing store and the rate-limit counter store (`backend/src/lib/redis.ts`)
@@ -192,7 +192,7 @@ This project sends real SMTP mail through [Ethereal Email](https://ethereal.emai
 - Slack OAuth v2 connect/disconnect flow (`backend/src/routes/slack.ts`, `backend/src/services/slack.ts`)
 - Real Slack rate-limit notifications (incoming webhook, or `chat.postMessage` fallback), deduped per sender per hour
 - Bull Board live queue dashboard mounted at `/admin/queues` (`backend/src/app.ts`)
-- Elasticsearch indexing on schedule + on status change, with graceful degradation if ES is unreachable (`backend/src/services/elasticsearch.ts`) — the API endpoint (`GET /api/emails/search`) exists and works, though the current frontend UI doesn't call it (see the Search note under Frontend below)
+- Elasticsearch indexing on schedule + on status change, with graceful degradation if ES is unreachable (`backend/src/services/elasticsearch.ts`), searchable from the dashboard's search box (`GET /api/emails/search`)
 - CSV/plain-text lead-list parsing (`POST /api/emails/upload-leads`, `backend/src/utils/csv.ts`)
 - Multi-sender support, each with independently auto-provisioned Ethereal credentials (`backend/src/routes/senders.ts`)
 - Combined API+worker production launcher for single-process deployment (`backend/src/startAll.ts`) — see §8
@@ -208,7 +208,7 @@ This project sends real SMTP mail through [Ethereal Email](https://ethereal.emai
 - "Send Later" scheduling popover with quick presets (Tomorrow, Tomorrow 10/11am, Tomorrow 3pm) and a full date-time picker — `frontend/src/components/SendLaterPopover.tsx`
 - Scheduled emails table with loading skeleton and empty state — `frontend/src/components/EmailTable.tsx`
 - Sent emails table (status `sent`/`failed`) with loading skeleton and empty state — same component
-- Client-side search box that filters the currently-loaded Scheduled/Sent rows by recipient or subject — `frontend/src/components/TopBar.tsx` + `DashboardPage.tsx`. **Note:** this filters what's already on screen; it does not currently call the backend's Elasticsearch-backed `GET /api/emails/search` endpoint, which exists and works but isn't wired into the UI yet.
+- Search box backed by the real Elasticsearch index (debounced `GET /api/emails/search`, results filtered to the active tab's statuses) — `frontend/src/components/TopBar.tsx`, `frontend/src/hooks/useDebouncedValue.ts`, `DashboardPage.tsx`. Degrades gracefully to filtering whatever page is already loaded if ES is unreachable, matching the backend's own degrade-not-break philosophy.
 - Sender selection ("From" dropdown, populated from `GET /api/senders`) — `ComposeModal.tsx`
 - Configurable delay between emails (seconds, converted to ms on submit) — `ComposeModal.tsx`
 - Configurable hourly limit per batch — `ComposeModal.tsx`
@@ -258,15 +258,16 @@ Only variables actually read by the source code are listed — nothing here is a
 | `NODE_ENV` | Standard Node environment flag. | `development` |
 | `FRONTEND_URL` | CORS origin allow-list; OAuth redirect targets after login. | `http://localhost:5173` |
 | `BACKEND_URL` | Builds the Google/Slack OAuth callback URLs. | `http://localhost:4000` |
-| `JWT_SECRET` | Signs the auth session cookie and the short-lived Slack OAuth `state` token. | `replace-with-a-long-random-string` |
-| `COOKIE_SECURE` | Sets the `Secure` flag on the auth cookie. | `false` (local), `true` (behind HTTPS) |
-| `DATABASE_URL` | Prisma/PostgreSQL connection string. | `postgresql://outbox:outbox@localhost:5432/outbox?schema=public` |
+| `JWT_SECRET` | Signs the Bearer auth token and the short-lived Slack OAuth `state` token. | `replace-with-a-long-random-string` |
+| `DATABASE_URL` | Prisma/PostgreSQL connection string (app runtime queries — the pooled connection if using one). | `postgresql://outbox:outbox@localhost:5432/outbox?schema=public` |
+| `DIRECT_URL` | Unpooled Postgres connection used only for `prisma migrate`. Repeat `DATABASE_URL` here unless `DATABASE_URL` points at a pooler (e.g. Supabase's pgbouncer) that can't run migrations. | same as `DATABASE_URL`, or the pooler's direct/session connection |
 | `REDIS_HOST` | Redis host for BullMQ + rate limiting. | `localhost` |
 | `REDIS_PORT` | Redis port. | `6379` |
 | `REDIS_PASSWORD` | Redis auth password, if required. | *(empty locally)* |
 | `REDIS_TLS` | Enables TLS on the Redis connection (needed for managed free Redis like Upstash). | `false` |
 | `ELASTICSEARCH_NODE` | Elasticsearch endpoint for indexing/search. Optional — the app degrades gracefully if unreachable. | `http://localhost:9200` |
 | `ELASTICSEARCH_INDEX` | Index name used for emails. | `emails` |
+| `ELASTICSEARCH_API_KEY` | API-key auth for a secured cluster (e.g. Elastic Cloud Serverless). Leave unset for local/Docker ES, which runs with security disabled. | *(empty locally)* |
 | `WORKER_CONCURRENCY` | BullMQ worker concurrent job slots. | `5` |
 | `MIN_DELAY_BETWEEN_EMAILS_MS` | Global floor between the start of any two sends. | `2000` |
 | `MAX_EMAILS_PER_HOUR_PER_SENDER` | Default hourly send cap per sender (a batch can override it). | `200` |
@@ -403,7 +404,6 @@ Every variable from the §6 backend table, plus:
 BACKEND_URL       https://<your-service>.onrender.com
 FRONTEND_URL      wherever you host the dashboard
 NODE_ENV          production
-COOKIE_SECURE     true
 REDIS_TLS         true   (if using Upstash/managed Redis)
 ```
 

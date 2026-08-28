@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import cookieParser from "cookie-parser";
 import passport from "passport";
 import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
@@ -17,9 +16,11 @@ export function createApp() {
   configurePassport();
 
   const app = express();
-  app.use(cors({ origin: env.frontendUrl, credentials: true }));
+  // No `credentials: true` needed — auth is a Bearer token in the
+  // Authorization header, not a cookie, so there's nothing cross-site
+  // cookie policy needs to allow.
+  app.use(cors({ origin: env.frontendUrl }));
   app.use(express.json());
-  app.use(cookieParser());
   app.use(passport.initialize());
 
   const serverAdapter = new ExpressAdapter();

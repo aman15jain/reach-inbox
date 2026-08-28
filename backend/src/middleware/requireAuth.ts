@@ -2,14 +2,18 @@ import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
-export const AUTH_COOKIE_NAME = "outbox_token";
-
 export function signAuthToken(userId: string): string {
   return jwt.sign({ sub: userId }, env.jwtSecret, { expiresIn: "7d" });
 }
 
+// Bearer token in the Authorization header, not a cookie: frontend and
+// backend are deployed on different sites, and cross-site cookies are
+// increasingly blocked by browsers (SameSite + third-party cookie
+// restrictions) regardless of attributes. The frontend attaches this
+// header itself on every request, sidestepping that entirely.
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies?.[AUTH_COOKIE_NAME];
+  const header = req.headers.authorization;
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
   if (!token) {
     return res.status(401).json({ error: "Not authenticated" });
   }
