@@ -387,11 +387,11 @@ Optional. Set `ELASTICSEARCH_NODE` to a free external host if you want live sear
 Render dashboard → **New → Web Service** → connect this repo →
 
 - **Root Directory:** `backend`
-- **Build Command:** `npm install && npm run build`
+- **Build Command:** `npm install && npx prisma generate && npx prisma migrate deploy && npm run build`
 - **Start Command:** `npm run start:all`
 - **Health Check Path:** `/api/health`
 
-Render injects `PORT` automatically; nothing to change for that (§6).
+`prisma migrate deploy` applies any pending migrations against `DIRECT_URL` on every deploy — safe to run even when there's nothing new to apply. Render injects `PORT` automatically; nothing to change for that (§6).
 
 ### 10.6 Environment variables to set on Render
 
