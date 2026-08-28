@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-white text-gray-900 antialiased;
+}
+
+.editable-placeholder:empty:before {
+  content: attr(data-placeholder);
+  color: theme("colors.gray.400");
+  pointer-events: none;
+}

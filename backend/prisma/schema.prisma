@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  googleId  String   @unique
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  senders         Sender[]
+  scheduledEmails ScheduledEmail[]
+  slackIntegration SlackIntegration?
+}
+
+model Sender {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        String
+  displayName  String
+  smtpHost     String
+  smtpPort     Int
+  smtpUser     String
+  smtpPass     String
+  createdAt    DateTime @default(now())
+
+  scheduledEmails ScheduledEmail[]
+
+  @@unique([userId, email])
+}
+
+enum EmailStatus {
+  scheduled
+  processing
+  rate_limited_delayed
+  sent
+  failed
+}
+
+model ScheduledEmail {
+  id                String      @id @default(uuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  senderId          String
+  sender            Sender      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  batchId           String
+  recipient         String
+  subject           String
+  body              String
+  delayBetweenMs     Int
+  hourlyLimit        Int
+  scheduledAt        DateTime
+  status             EmailStatus @default(scheduled)
+  bullJobId          String?     @unique
+  attempts           Int         @default(0)
+  error              String?
+  sentAt             DateTime?
+  previewUrl         String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([userId, status])
+  @@index([batchId])
+  @@index([senderId, status])
+}
+
+model SlackIntegration {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId      String
+  teamName    String
+  accessToken String
+  webhookUrl  String?
+  channel     String?
+  createdAt   DateTime @default(now())
+}
