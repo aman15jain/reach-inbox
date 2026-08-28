@@ -31,7 +31,16 @@ authRouter.get(
     res.cookie(AUTH_COOKIE_NAME, token, {
       httpOnly: true,
       secure: env.cookieSecure,
-      sameSite: "lax",
+      // Frontend and backend are deployed on different Render subdomains,
+      // which browsers treat as fully separate sites (onrender.com is on
+      // the Public Suffix List). A SameSite=Lax cookie is only sent on
+      // top-level navigations cross-site — never on the XHR/fetch calls
+      // AuthContext makes to /api/auth/me — so it silently never reaches
+      // the backend and every request looks logged-out. SameSite=None
+      // (only valid alongside Secure, hence tied to cookieSecure) fixes
+      // that; local dev over plain http keeps the Lax default since
+      // None+non-Secure cookies are rejected by browsers outright.
+      sameSite: env.cookieSecure ? "none" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     res.redirect(`${env.frontendUrl}/dashboard`);
